@@ -75,8 +75,19 @@ export async function onRequest(context) {
     // 验证代理请求的鉴权
     async function validateAuth(request, env) {
         const url = new URL(request.url);
+        // 从 Worker 请求的 URL 中获取 auth 和 t 参数
+        // 这些参数应该在查询字符串中，如 ?auth=xxx&t=123
         const authHash = url.searchParams.get('auth');
         const timestamp = url.searchParams.get('t');
+        
+        logDebug(`鉴权检查：auth=${authHash ? '存在' : '缺失'}, t=${timestamp ? '存在' : '缺失'}`);
+        logDebug(`完整 URL: ${url.toString()}`);
+        
+        // 如果没有 auth 参数，直接失败
+        if (!authHash) {
+            console.warn('代理请求鉴权失败：缺少 auth 参数');
+            return false;
+        }
         
         // 获取服务器端密码
         const serverPassword = env.PASSWORD;

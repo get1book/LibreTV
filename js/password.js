@@ -57,6 +57,10 @@ async function verifyPassword(password) {
                 timestamp: Date.now(),
                 passwordHash: correctHash
             }));
+            // 同时存储密码哈希到 proxyAuthHash，供代理请求使用
+            localStorage.setItem('proxyAuthHash', correctHash);
+            // 兼容旧代码：也存储到 userPassword（虽然这不是真正的密码）
+            localStorage.setItem('userPassword', 'verified_hash_' + correctHash.substring(0, 16));
         }
         return isValid;
     } catch (error) {
