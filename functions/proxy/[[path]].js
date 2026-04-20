@@ -75,8 +75,19 @@ export async function onRequest(context) {
     // 验证代理请求的鉴权
     async function validateAuth(request, env) {
         const url = new URL(request.url);
+        // 从 Worker 请求的 URL 中获取 auth 和 t 参数
+        // 这些参数应该在查询字符串中，如 ?auth=xxx&t=123
         const authHash = url.searchParams.get('auth');
         const timestamp = url.searchParams.get('t');
+        
+        logDebug(`鉴权检查：auth=${authHash ? '存在' : '缺失'}, t=${timestamp ? '存在' : '缺失'}`);
+        logDebug(`完整 URL: ${url.toString()}`);
+        
+        // 如果没有 auth 参数，直接失败
+        if (!authHash) {
+            console.warn('代理请求鉴权失败：缺少 auth 参数');
+            return false;
+        }
         
         // 获取服务器端密码
         const serverPassword = env.PASSWORD;
@@ -114,18 +125,6 @@ export async function onRequest(context) {
         }
         
         return true;
-    }
-
-    // 验证鉴权（主函数调用）
-    if (!validateAuth(request, env)) {
-        return new Response('Unauthorized', { 
-            status: 401,
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-                'Access-Control-Allow-Headers': '*'
-            }
-        });
     }
 
     // 输出调试日志 (需要设置 DEBUG: true 环境变量)
@@ -246,7 +245,7 @@ export async function onRequest(context) {
         return `/proxy/${encodeURIComponent(targetUrl)}`;
     }
 
-    // 获取远程内容及其类型
+    // 获取远程内容及其类型（仅用于 M3U8 文本处理）
     async function fetchContentWithType(targetUrl) {
         const headers = new Headers({
             'User-Agent': getRandomUserAgent(),
@@ -259,30 +258,85 @@ export async function onRequest(context) {
 
         try {
             // 直接请求目标 URL
-            logDebug(`开始直接请求: ${targetUrl}`);
+            logDebug(`开始直接请求：${targetUrl}`);
             // Cloudflare Functions 的 fetch 默认支持重定向
             const response = await fetch(targetUrl, { headers, redirect: 'follow' });
 
             if (!response.ok) {
                  const errorBody = await response.text().catch(() => '');
-                 logDebug(`请求失败: ${response.status} ${response.statusText} - ${targetUrl}`);
+                 logDebug(`请求失败：${response.status} ${response.statusText} - ${targetUrl}`);
                  throw new Error(`HTTP error ${response.status}: ${response.statusText}. URL: ${targetUrl}. Body: ${errorBody.substring(0, 150)}`);
             }
 
-            // 读取响应内容为文本
+            // 读取响应内容为文本（仅适用于 M3U8 等小文本文件）
             const content = await response.text();
             const contentType = response.headers.get('Content-Type') || '';
-            logDebug(`请求成功: ${targetUrl}, Content-Type: ${contentType}, 内容长度: ${content.length}`);
+            logDebug(`请求成功：${targetUrl}, Content-Type: ${contentType}, 内容长度：${content.length}`);
             return { content, contentType, responseHeaders: response.headers }; // 同时返回原始响应头
 
         } catch (error) {
-             logDebug(`请求彻底失败: ${targetUrl}: ${error.message}`);
+             logDebug(`请求彻底失败：${targetUrl}: ${error.message}`);
             // 抛出更详细的错误
-            throw new Error(`请求目标URL失败 ${targetUrl}: ${error.message}`);
+            throw new Error(`请求目标 URL 失败 ${targetUrl}: ${error.message}`);
         }
     }
 
-    // 判断是否是 M3U8 内容
+    // 流式代理媒体文件（支持 Range 请求）
+    async function streamMediaFile(targetUrl) {
+        const headers = new Headers({
+            'User-Agent': getRandomUserAgent(),
+            'Accept': request.headers.get('Accept') || '*/*',
+            'Accept-Language': request.headers.get('Accept-Language') || 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Referer': request.headers.get('Referer') || new URL(targetUrl).origin
+        });
+
+        // 关键：传递 Range 头以支持视频拖拽和分段加载
+        const rangeHeader = request.headers.get('Range');
+        if (rangeHeader) {
+            headers.set('Range', rangeHeader);
+            logDebug(`传递 Range 头：${rangeHeader}`);
+        }
+
+        logDebug(`开始流式请求媒体文件：${targetUrl}`);
+        const response = await fetch(targetUrl, { headers, redirect: 'follow' });
+
+        if (!response.ok) {
+            logDebug(`流式请求失败：${response.status} ${response.statusText} - ${targetUrl}`);
+            throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+        }
+
+        logDebug(`流式请求成功，状态码：${response.status}`);
+        
+        // 创建新的响应头，保留重要的原始头信息
+        const newHeaders = new Headers();
+        
+        // 复制 Content-Range 或 Content-Length
+        if (response.headers.has('Content-Range')) {
+            newHeaders.set('Content-Range', response.headers.get('Content-Range'));
+        }
+        if (response.headers.has('Content-Length')) {
+            newHeaders.set('Content-Length', response.headers.get('Content-Length'));
+        }
+        if (response.headers.has('Content-Type')) {
+            newHeaders.set('Content-Type', response.headers.get('Content-Type'));
+        }
+        if (response.headers.has('Accept-Ranges')) {
+            newHeaders.set('Accept-Ranges', response.headers.get('Accept-Ranges'));
+        }
+        
+        // 添加 CORS 头
+        newHeaders.set('Access-Control-Allow-Origin', '*');
+        newHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
+        newHeaders.set('Access-Control-Allow-Headers', '*');
+        
+        // 关键：直接流式传输 body，不读取到内存
+        return new Response(response.body, {
+            status: response.status, // 保持原始状态码（206 或 200）
+            headers: newHeaders
+        });
+    }
+
+
     function isM3u8Content(content, contentType) {
         // 检查 Content-Type
         if (contentType && (contentType.includes('application/vnd.apple.mpegurl') || contentType.includes('application/x-mpegurl') || contentType.includes('audio/mpegurl'))) {
@@ -410,17 +464,17 @@ export async function onRequest(context) {
             }
         }
 
-         if (!bestVariantUrl) {
-             logDebug(`主列表中未找到 BANDWIDTH 或 STREAM-INF，尝试查找第一个子列表引用: ${url}`);
-             for (let i = 0; i < lines.length; i++) {
-                 const line = lines[i].trim();
-                 if (line && !line.startsWith('#') && (line.endsWith('.m3u8') || line.includes('.m3u8?'))) { // 修复：检查是否包含 .m3u8?
+        if (!bestVariantUrl) {
+            logDebug(`主列表中未找到 BANDWIDTH 或 STREAM-INF，尝试查找第一个子列表引用: ${url}`);
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (line && !line.startsWith('#') && (line.endsWith('.m3u8') || line.includes('.m3u8?'))) {
                     bestVariantUrl = resolveUrl(baseUrl, line);
-                     logDebug(`备选方案：找到第一个子列表引用: ${bestVariantUrl}`);
-                     break;
-                 }
-             }
-         }
+                    logDebug(`备选方案：找到第一个子列表引用: ${bestVariantUrl}`);
+                    break;
+                }
+            }
+        }
 
         if (!bestVariantUrl) {
             logDebug(`在主列表 ${url} 中未找到任何有效的子播放列表 URL。可能格式有问题或仅包含音频/字幕。将尝试按媒体列表处理原始内容。`);
@@ -562,7 +616,17 @@ export async function onRequest(context) {
             const processedM3u8 = await processM3u8Content(targetUrl, content, 0, env);
             return createM3u8Response(processedM3u8);
         } else {
-            logDebug(`内容不是 M3U8 (类型: ${contentType})，直接返回: ${targetUrl}`);
+            logDebug(`内容不是 M3U8 (类型：${contentType})，检查是否为媒体文件需要流式传输：${targetUrl}`);
+            // 对于媒体文件（视频/音频），使用流式传输以支持 Range 请求
+            if (MEDIA_CONTENT_TYPES.some(type => contentType && contentType.toLowerCase().startsWith(type))) {
+                logDebug(`检测到媒体类型，使用流式传输：${contentType}`);
+                try {
+                    return await streamMediaFile(targetUrl);
+                } catch (streamError) {
+                    logDebug(`流式传输失败，回退到普通响应：${streamError.message}`);
+                }
+            }
+            // 非媒体文件直接返回
             const finalHeaders = new Headers(responseHeaders);
             finalHeaders.set('Cache-Control', `public, max-age=${CACHE_TTL}`);
             // 添加 CORS 头，确保非 M3U8 内容也能跨域访问（例如图片、字幕文件等）
@@ -573,8 +637,8 @@ export async function onRequest(context) {
         }
 
     } catch (error) {
-        logDebug(`处理代理请求时发生严重错误: ${error.message} \n ${error.stack}`);
-        return createResponse(`代理处理错误: ${error.message}`, 500);
+        logDebug(`处理代理请求时发生严重错误：${error.message} \n ${error.stack}`);
+        return createResponse(`代理处理错误：${error.message}`, 500);
     }
 }
 

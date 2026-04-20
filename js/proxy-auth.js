@@ -30,9 +30,9 @@ async function getPasswordHash() {
         return storedPasswordHash;
     }
     
-    // 3. 尝试从用户输入的密码生成哈希
+    // 3. 尝试从用户输入的密码生成哈希（兼容旧逻辑）
     const userPassword = localStorage.getItem('userPassword');
-    if (userPassword) {
+    if (userPassword && !userPassword.startsWith('verified_hash_')) {
         try {
             // 动态导入 sha256 函数
             const { sha256 } = await import('./sha256.js');
@@ -45,12 +45,10 @@ async function getPasswordHash() {
         }
     }
     
-    // 4. 如果用户没有设置密码，尝试使用环境变量中的密码哈希
-    if (window.__ENV__ && window.__ENV__.PASSWORD) {
-        cachedPasswordHash = window.__ENV__.PASSWORD;
-        return window.__ENV__.PASSWORD;
-    }
-    
+    // 4. 如果没有找到密码哈希，返回 null
+    // 注意：前端无法直接访问服务器端的环境变量
+    // 用户必须先通过密码验证界面输入密码，才能获取哈希值
+    console.warn('未找到可用的密码哈希，请确保已通过密码验证');
     return null;
 }
 
