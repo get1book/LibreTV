@@ -767,18 +767,25 @@ class CustomHlsJsLoader extends Hls.DefaultConfig.loader {
             // 重写URL为代理URL
             if (context.url) {
                 try {
-                    const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
-                        await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(context.url)) :
-                        PROXY_URL + encodeURIComponent(context.url);
-                    context.url = proxiedUrl;
-                    console.log(`[Proxy] ${context.type} request routed through proxy: ${proxiedUrl.substring(0, 100)}...`);
+                    // 确保 URL 是干净的，去除可能的空格
+                    let cleanUrl = context.url.trim();
+                    
+                    // 如果已经是代理 URL，跳过再次编码
+                    if (!cleanUrl.startsWith('/proxy/')) {
+                        const proxiedUrl = await window.ProxyAuth?.addAuthToProxyUrl ? 
+                            await window.ProxyAuth.addAuthToProxyUrl(PROXY_URL + encodeURIComponent(cleanUrl)) :
+                            PROXY_URL + encodeURIComponent(cleanUrl);
+                        context.url = proxiedUrl;
+                        console.log(`[Proxy] ${context.type} request routed through proxy: ${proxiedUrl.substring(0, 100)}...`);
+                    }
                 } catch (error) {
                     console.error('[Proxy] Failed to add auth to proxy URL:', error);
                     // Fallback to proxy without auth
-                    context.url = PROXY_URL + encodeURIComponent(context.url);
+                    let cleanUrl = context.url.trim();
+                    if (!cleanUrl.startsWith('/proxy/')) {
+                        context.url = PROXY_URL + encodeURIComponent(cleanUrl);
+                    }
                 }
-            }
-
             if (context.type === 'manifest' || context.type === 'level') {
                 const onSuccess = callbacks.onSuccess;
                 callbacks.onSuccess = function (response, stats, context) {
