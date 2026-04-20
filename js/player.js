@@ -786,6 +786,8 @@ class CustomHlsJsLoader extends Hls.DefaultConfig.loader {
                         context.url = PROXY_URL + encodeURIComponent(cleanUrl);
                     }
                 }
+            }
+            
             if (context.type === 'manifest' || context.type === 'level') {
                 const onSuccess = callbacks.onSuccess;
                 callbacks.onSuccess = function (response, stats, context) {
