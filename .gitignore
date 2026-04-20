@@ -1,12 +1,8 @@
-```
 # Compiled and build artifacts
 *.pyc
 __pycache__/
 *.o
 *.obj
-dist/
-build/
-*.class
 *.exe
 *.dll
 *.so
@@ -17,8 +13,8 @@ build/
 .venv/
 venv/
 node_modules/
-.julia/
-zig*/
+dist/
+build/
 target/
 .gradle/
 .mypy_cache/
@@ -33,13 +29,11 @@ target/
 # Environment
 .env
 .env.local
-.env.*
+*.env.*
 
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
 # System files
 .DS_Store
@@ -73,4 +67,3 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
-```

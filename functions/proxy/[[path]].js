@@ -234,10 +234,6 @@ export async function onRequest(context) {
         return `/proxy/${encodeURIComponent(targetUrl)}`;
     }
 
-    // 确保目标 URL 被正确编码，以便作为路径的一部分
-        return `/proxy/${encodeURIComponent(targetUrl)}`;
-    }
-
     // 获取远程内容及其类型（仅用于 M3U8 文本处理）
     async function fetchContentWithType(targetUrl) {
         const headers = new Headers({
